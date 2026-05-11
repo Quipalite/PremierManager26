@@ -2524,7 +2524,6 @@ let G={
   captain:null,
   loanNegotiations:[],
   setpieceTakers:{corners:'',freekicks:'',penalties:''},
-  negotiations:[],
   faNegotiations:[],
   faCup:{rounds:[],currentRound:0,eliminated:false,winner:null,myRoundResults:[]},
   carabaoCup:{rounds:[],currentRound:0,eliminated:false,winner:null,myRoundResults:[]},
@@ -2719,6 +2718,35 @@ function selectTeam(club){
   allTransferPlayers=[];
   Object.keys(allPlayersByClub).filter(c=>c!==club).forEach(c=>{allPlayersByClub[c].forEach(p=>allTransferPlayers.push({...p,club:c}));});
   G.fixtures=generateFixtures();
+  // ── POINTS DEDUCTION SYSTEM ──────────────────────────────────────────────
+  // Each club has a 1% chance of starting the season with a points deduction
+  G._pointDeductions=[];
+  const _deductionReasons=[
+    'financial irregularities',
+    'breaching Profit and Sustainability rules',
+    'an unpaid tax liability',
+    'fielding an ineligible player last season',
+    'a breach of EFL financial fair play rules carried over from promotion',
+    'failure to comply with an independent commission ruling',
+    'historic financial misconduct',
+  ];
+  const _deductionAmounts=[2,3,4,6,8,10,12];
+  const _allLeagueClubs=Object.keys(CLUBS);
+  _allLeagueClubs.forEach(t=>{
+    if(Math.random()<0.01){
+      const pts=_deductionAmounts[Math.floor(Math.random()*_deductionAmounts.length)];
+      const reason=_deductionReasons[Math.floor(Math.random()*_deductionReasons.length)];
+      const isMyClub=(t===club);
+      if(isMyClub){
+        G.pressure=Math.min(100,G.pressure+18);
+        G.morale=Math.max(0,G.morale-12);
+      } else {
+        const _team=G.otherTeams[t];
+        if(_team)_team.pts=(_team.pts||0)-pts;
+      }
+      G._pointDeductions.push({club:t,pts,reason,isMyClub});
+    }
+  });
   buildLineupFromFormation();
   // Set default set piece takers
   const fw=G.squad.find(p=>posGroup(p.pos)==='FWD');const mid=G.squad.find(p=>posGroup(p.pos)==='MID');
@@ -2744,6 +2772,26 @@ function selectTeam(club){
 // ═══════════════════════════════════════
 // PRE-SEASON TRAINING MATCH vs U-21
 // ═══════════════════════════════════════
+function _announcePointDeductions(){
+  if(!G._pointDeductions||!G._pointDeductions.length)return;
+  G._pointDeductions.forEach(d=>{
+    const abbr=(CLUBS[d.club]||{abbr:d.club}).abbr;
+    const icon=d.isMyClub?'🚨':'📰';
+    const msg=`${icon} ${d.club} have been deducted ${d.pts} point${d.pts!==1?'s':''} for ${d.reason}.`;
+    notify(msg,d.isMyClub?'var(--rd)':'var(--mu)');
+    // Push to inbox as a board message if it affects the player's club
+    if(d.isMyClub){
+      G.inbox=G.inbox||[];
+      G.inbox.unshift({
+        id:uid(),player:'Board of Directors',pos:'BOD',pid:'board',type:'deduction',
+        msg:`The Premier League have confirmed we have been deducted ${d.pts} point${d.pts!==1?'s':''} due to ${d.reason}. This is a serious matter. We begin the season on ${-d.pts} points. We need results immediately.`,
+        week:0,read:false,isBoard:true
+      });
+    }
+  });
+}
+
+
 function _runPreSeasonMatch(club){
   // Build U-21 XI from the youth squad
   const youth=[...G.youthSquad];
@@ -2773,7 +2821,7 @@ function _runPreSeasonMatch(club){
   // Show welcome cutscene with kick-off prompt
   const csBtn=document.getElementById('cs-btn');
   showCutscene('cs-sign','WELCOME TO '+club.toUpperCase(),'Pre-Season Begins','Kick off a training match against your U-21 side to prepare for the season.','⚽ Head to Match Centre','var(--go)');
-  if(csBtn){csBtn.onclick=()=>{closeCutscene();nav('match');updateHeader();renderDashboard();};}
+  if(csBtn){csBtn.onclick=()=>{closeCutscene();_announcePointDeductions();nav('match');updateHeader();renderDashboard();};}
 }
 
 function kickOffU21Match(){
@@ -2816,7 +2864,7 @@ function kickOffU21Match(){
   document.getElementById('lm-home-name').textContent=(CLUBS[club]||{abbr:club}).abbr;
   document.getElementById('lm-away-name').textContent='U-21';
   document.getElementById('lm-home-logo').innerHTML=logoImg(club,36);
-  document.getElementById('lm-away-logo').innerHTML=logoImg(club,36);
+  document.getElementById('lm-away-logo').innerHTML=`<div style="width:36px;height:36px;border-radius:8px;background:#1e293b;border:1px solid rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#94a3b8">U21</div>`;
   document.getElementById('lm-venue').textContent='Pre-Season · Training Ground';
   document.getElementById('lm-score-h').textContent='0';
   document.getElementById('lm-score-a').textContent='0';
@@ -2921,6 +2969,9 @@ function getMyStats(){
     if(r.home===G.myClub){p++;gf+=r.homeGoals;ga+=r.awayGoals;if(r.homeGoals>r.awayGoals){w++;pts+=3;form.push('W');}else if(r.homeGoals===r.awayGoals){d++;pts++;form.push('D');}else{l++;form.push('L');}}
     if(r.away===G.myClub){p++;gf+=r.awayGoals;ga+=r.homeGoals;if(r.awayGoals>r.homeGoals){w++;pts+=3;form.push('W');}else if(r.awayGoals===r.homeGoals){d++;pts++;form.push('D');}else{l++;form.push('L');}}
   });
+  // Apply any season-start points deduction for my club
+  const _myDeduct=(G._pointDeductions||[]).find(d=>d.isMyClub);
+  if(_myDeduct)pts-=_myDeduct.pts;
   return{name:G.myClub,played:p,won:w,drawn:d,lost:l,gf,ga,gd:gf-ga,pts,form:form.slice(-5)};
 }
 function getSorted(){
@@ -6678,6 +6729,7 @@ function skipToEnd(){
   // Spectator mode — just close
   if(liveMatchData?.isSpectator){
     if(matchInterval){clearInterval(matchInterval);matchInterval=null;}
+    if(_setPieceResumeTimeout){clearTimeout(_setPieceResumeTimeout);_setPieceResumeTimeout=null;}
     document.getElementById('live-match-overlay').style.display='none';
     const subBtn=document.getElementById('sub-btn');
     const tlBtn=document.getElementById('touchline-btn');
@@ -6831,6 +6883,8 @@ function finaliseMatch(){
       }
     }
     const goalDiff=myG-opG;
+    const oc=CLUBS[opp]||{str:70};
+    const effStr=getEffectiveStr();
     if(goalDiff>0){
       // Wins give less morale boost unless against a stronger opponent — easy wins don't matter
       const oppStrBonus=Math.max(0,(oc.str-effStr)*0.08); // beating a stronger side gives extra lift
@@ -6899,7 +6953,7 @@ function finaliseMatch(){
       y.progress=Math.min(100,y.progress+rnd(2,7));
       y.rating=Math.min(y.potential,y.rating+rnd(0,1));
       // Age players once per season (every ~38 weeks)
-      if(G.week%38===0){y.age=Math.min(21,(y.age||16)+1);}
+      if(G.week>0&&G.week%38===0){y.age=Math.min(21,(y.age||16)+1);}
       // Auto-notify when player is ready (progress 100%)
       if(y.progress>=100&&!y._readyNotified){
         y._readyNotified=true;
@@ -6914,7 +6968,7 @@ function finaliseMatch(){
       G.youthSquad.push({name:youthName(),pos,nat:'England',age,rating,potential,value:0,goals:0,assists:0,morale:75+rnd(0,15),id:uid(),selected:false,progress:rnd(10,40)});
       notify(`🌱 A new prospect has joined the U-21 academy!`,'var(--bl)');
     }
-    resolveNegotiations();resolveFANegotiations();updateBoardPressure();checkSack();checkMilestones();
+    resolveNegotiations();resolveFANegotiations();resolveLoanNegotiations();updateBoardPressure();checkSack();checkMilestones();checkManagerOfMonth();
     G.weekHubTraining=null;G.weekHubTalk=null;G.weekBonus={};
     showPostMatch(nxt,isH,opp,myG,opG,myScorers,oppScorers);
     liveMatchData=null;
@@ -7769,16 +7823,9 @@ function renderTable(){
     const zone=i<4?'cl-zone':i<6?'eur-zone':i<7?'conf-zone':i>=17?'rel-zone':'';
     const form=(t.form||[]).slice(-5).map(f=>`<span class="form-dot form-${f.toLowerCase()}"></span>`).join('');
     const mgr=isMe?G.myManager:(t.manager||'—');
-    return`<tr class="${zone}${isMe?' you-row':''}" style="cursor:pointer" onclick="showClubProfile('${t.name.replace(/'/g,"\\'")}')">
-      <td style="font-family:'Bebas Neue';font-size:16px;color:${isMe?'var(--pk)':'var(--mu)'}">${i+1}</td>
-      <td><div style="display:flex;align-items:center;gap:6px">${logoImg(t.name,20)}<span style="${isMe?'color:var(--pk);font-weight:700':''}">${(CLUBS[t.name]||{abbr:t.name}).abbr}</span></div></td>
-      <td>${t.played}</td><td>${t.won}</td><td>${t.drawn}</td><td>${t.lost}</td>
-      <td>${t.gf}</td><td>${t.ga}</td>
-      <td>${t.gd>=0?'+':''}${t.gd}</td>
-      <td class="pts-col">${t.pts}</td>
-      <td>${form||'—'}</td>
-      <td style="font-size:10px;color:var(--mu);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${mgr}</td>
-    </tr>`;
+    const _ded=(G._pointDeductions||[]).find(d=>d.club===t.name);
+    const _dedBadge=_ded?`<span title="\u22121pts deduction: ${_ded.reason}" style="display:inline-flex;align-items:center;font-size:8px;font-weight:800;background:rgba(232,90,90,.18);color:var(--rd);border:1px solid rgba(232,90,90,.35);border-radius:4px;padding:1px 4px;margin-left:4px;cursor:default">\u2212${_ded.pts}</span>`:'';
+    return`<tr class="${zone}${isMe?' you-row':''}" style="cursor:pointer" onclick="showClubProfile('${t.name.replace(/'/g,"\\'")}')">\n      <td style="font-family:'Bebas Neue';font-size:16px;color:${isMe?'var(--pk)':'var(--mu)'}">${i+1}</td>\n      <td><div style="display:flex;align-items:center;gap:6px">${logoImg(t.name,20)}<span style="${isMe?'color:var(--pk);font-weight:700':''}">${(CLUBS[t.name]||{abbr:t.name}).abbr}</span>${_dedBadge}</div></td>\n      <td>${t.played}</td><td>${t.won}</td><td>${t.drawn}</td><td>${t.lost}</td>\n      <td>${t.gf}</td><td>${t.ga}</td>\n      <td>${t.gd>=0?'+':''}${t.gd}</td>\n      <td class="pts-col">${t.pts}</td>\n      <td>${form||'—'}</td>\n      <td style="font-size:10px;color:var(--mu);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${mgr}</td>\n    </tr>`;
   }).join('');
 }
 
@@ -8222,21 +8269,24 @@ function _faSimQualLeg(tie, isLeg1){
 }
 
 function _faQualTieWinner(tie){
-  // Aggregate over two legs: leg1 home plays at home, leg2 home plays away
-  const agg1=tie.leg1HomeGoals+tie.leg2AwayGoals; // tie.home aggregate
-  const agg2=tie.leg1AwayGoals+tie.leg2HomeGoals; // tie.away aggregate
-  if(agg1>agg2) return tie.home;
-  if(agg2>agg1) return tie.away;
-  // Away goals: tie.away scored in leg1 (away) = leg1AwayGoals; tie.home scored in leg2 away = leg2AwayGoals
-  const homeAwayGoals=tie.leg2AwayGoals; // home team's away goals (scored in leg 2 at away ground)
-  const awayAwayGoals=tie.leg1AwayGoals; // away team's away goals (scored in leg 1 at home ground)
-  if(awayAwayGoals>homeAwayGoals) return tie.away;
-  if(homeAwayGoals>awayAwayGoals) return tie.home;
-  // Pens
+  // Use original home/away for consistency (in leg 2, home/away are swapped in the tie object)
+  const origHome=tie._origHome||tie.home;
+  const origAway=tie._origAway||tie.away;
+  // Aggregate over two legs: origHome scores leg1HomeGoals + leg2AwayGoals
+  const origHomeAgg=tie.leg1HomeGoals+tie.leg2AwayGoals;
+  const origAwayAgg=tie.leg1AwayGoals+tie.leg2HomeGoals;
+  if(origHomeAgg>origAwayAgg) return origHome;
+  if(origAwayAgg>origHomeAgg) return origAway;
+  // Away goals rule: origHome's away goals in leg2 (leg2AwayGoals), origAway's away goals in leg1 (leg1AwayGoals)
+  const origHomeAwayGoals=tie.leg2AwayGoals;
+  const origAwayAwayGoals=tie.leg1AwayGoals;
+  if(origAwayAwayGoals>origHomeAwayGoals) return origAway;
+  if(origHomeAwayGoals>origAwayAwayGoals) return origHome;
+  // Penalties
   tie.pens=true;
-  const hStr=(CLUBS[tie.home]||{str:70}).str;
-  const aStr=(CLUBS[tie.away]||{str:70}).str;
-  return Math.random()<(hStr/(hStr+aStr))?tie.home:tie.away;
+  const hStr=(CLUBS[origHome]||{str:70}).str;
+  const aStr=(CLUBS[origAway]||{str:70}).str;
+  return Math.random()<(hStr/(hStr+aStr))?origHome:origAway;
 }
 
 function simulateFACupRound(roundIdx){
@@ -8447,8 +8497,14 @@ function renderCupScorers(scorersElId,assistsElId,goalProp,assistProp,compColor)
   });
   const comp=goalProp==='facupGoals'?'facup':'carabao';
   G.results.filter(r=>r.comp===comp).forEach(r=>{
-    (r.homeScorers||[]).forEach(s=>{if(!mySquadNames.has(s.name)){scoreMap[s.name]=(scoreMap[s.name]||0)+1;clubMap[s.name]=clubMap[s.name]||r.home;}});
-    (r.awayScorers||[]).forEach(s=>{if(!mySquadNames.has(s.name)){scoreMap[s.name]=(scoreMap[s.name]||0)+1;clubMap[s.name]=clubMap[s.name]||r.away;}});
+    (r.homeScorers||[]).forEach(s=>{
+      if(!mySquadNames.has(s.name)){scoreMap[s.name]=(scoreMap[s.name]||0)+1;clubMap[s.name]=clubMap[s.name]||r.home;}
+      if(s.assist&&!mySquadNames.has(s.assist)){assistMap[s.assist]=(assistMap[s.assist]||0)+1;clubMap[s.assist]=clubMap[s.assist]||r.home;}
+    });
+    (r.awayScorers||[]).forEach(s=>{
+      if(!mySquadNames.has(s.name)){scoreMap[s.name]=(scoreMap[s.name]||0)+1;clubMap[s.name]=clubMap[s.name]||r.away;}
+      if(s.assist&&!mySquadNames.has(s.assist)){assistMap[s.assist]=(assistMap[s.assist]||0)+1;clubMap[s.assist]=clubMap[s.assist]||r.away;}
+    });
   });
   const mkRow=(n,val,icon)=>{
     const isMe=mySquadNames.has(n);
@@ -8531,7 +8587,7 @@ function renderFACup(){
                 ${logoImg(G.myClub,40)}<div class="bebas" style="font-size:36px;color:${won?'var(--gr)':'var(--rd)'}">${mg}–${og}</div>${logoImg(opp,40)}
               </div>
               ${aggText}
-              <div style="text-align:center;margin-top:6px;font-size:12px;color:${won?'var(--gr)':'var(--rd)'}font-weight:700">${isLeg1?'✅ 1st Leg done — 2nd Leg to come':won?'✅ Through to Third Round!':'❌ Eliminated in Qualifying'}</div>
+              <div style="text-align:center;margin-top:6px;font-size:12px;color:${won?'var(--gr)':'var(--rd)'};font-weight:700">${isLeg1?'✅ 1st Leg done — 2nd Leg to come':won?'✅ Through to Third Round!':'❌ Eliminated in Qualifying'}</div>
             </div>`;
         } else if(G.week>=round.week){
           document.getElementById('facup-my-fixture').innerHTML=`
@@ -8629,8 +8685,8 @@ function renderFACup(){
           scoreText=`${t.leg1HomeGoals}–${t.leg1AwayGoals}`;
         } else if(r.twoLegs&&r.leg===2&&t.leg2Played){
           // Show leg score + aggregate
-          const aggH=(t.leg1AwayGoals||0)+(t.leg2HomeGoals||0);
-          const aggA=(t.leg1HomeGoals||0)+(t.leg2AwayGoals||0);
+          const origHomeAgg=(t.leg1HomeGoals||0)+(t.leg2AwayGoals||0);
+          const origAwayAgg=(t.leg1AwayGoals||0)+(t.leg2HomeGoals||0);
           scoreText=`${t.leg2HomeGoals}–${t.leg2AwayGoals} <span style="font-size:9px;color:var(--mu)">(${aggH}–${aggA} agg)</span>`;
         } else if(!r.twoLegs&&t.played){
           scoreText=`${t.homeGoals}–${t.awayGoals}${t.pens?' (P)':t.et?' (AET)':''}`;
@@ -8653,7 +8709,7 @@ function renderFACup(){
           </div>
         </div>`;
       }).join('')}
-      ${r.twoLegs&&r.leg===1&&r.qualByeTeams?.length?`<div style="font-size:10px;color:var(--mu);padding:6px 4px;margin-top:4px;border-top:1px solid var(--bd)">🎟️ Bye to Third Round (top 12): ${(r.qualByeTeams||cup._qualByeTeams||[]).map(c=>(CLUBS[c]||{abbr:c}).abbr).join(', ')}</div>`:''}
+      ${r.twoLegs&&r.leg===1&&cup._qualByeTeams?.length?`<div style="font-size:10px;color:var(--mu);padding:6px 4px;margin-top:4px;border-top:1px solid var(--bd)">🎟️ Bye to Third Round (top 12): ${(cup._qualByeTeams||[]).map(c=>(CLUBS[c]||{abbr:c}).abbr).join(', ')}</div>`:''}
     </div>`).join('');
   renderCupScorers('facup-top-scorers','facup-top-assists','facupGoals','facupAssists','var(--bl)');
 }
@@ -8662,30 +8718,35 @@ function renderFACup(){
 // CARABAO CUP
 // ═══════════════════════════════════════
 const CARABAO_ROUNDS=[
-  {name:'Round of 16',week:4},
-  {name:'Quarter-Final',week:10},
-  {name:'Semi-Final',week:15},
-  {name:'Semi-Final 2nd Leg',week:19},
-  {name:'Final',week:32},
+  {name:'Qualifying Round (1st Leg)',week:2,twoLegs:true,leg:1},
+  {name:'Qualifying Round (2nd Leg)',week:4,twoLegs:true,leg:2},
+  {name:'Round of 16',week:7},
+  {name:'Quarter-Final',week:12},
+  {name:'Semi-Final',week:18},
+  {name:'Semi-Final 2nd Leg',week:22},
+  {name:'Final',week:35},
 ];
 
 function generateCarabaoCup(){
   const allClubs=[G.myClub,...Object.keys(G.otherTeams)];
-  const shuffled=[...allClubs].sort(()=>Math.random()-.5);
-  // PL has 20 teams — even number, no byes needed. Only add bye if truly odd.
-  const teams=[...shuffled];
-  if(teams.length%2!==0){
-    // Drop the weakest non-user team instead of adding a bye
-    const dropIdx=teams.map((c,i)=>({c,i,str:(CLUBS[c]||{str:70}).str})).filter(x=>x.c!==G.myClub).sort((a,b)=>a.str-b.str)[0]?.i;
-    if(dropIdx!==undefined)teams.splice(dropIdx,1);
-  }
-  const ties=[];
-  for(let i=0;i<teams.length;i+=2){
-    ties.push({home:teams[i],away:teams[i+1],played:false,homeGoals:0,awayGoals:0,homeScorers:[],awayScorers:[],winner:null,et:false,pens:false});
+  // Sort by strength: weakest 8 play qualifying, strongest 12 get byes to Round of 16
+  const sorted=[...allClubs].sort((a,b)=>(CLUBS[a]||{str:70}).str-(CLUBS[b]||{str:70}).str);
+  const qualTeams=sorted.slice(0,8);
+  const byeTeams=sorted.slice(8);
+  const qualShuffled=[...qualTeams].sort(()=>Math.random()-.5);
+  const qualTies=[];
+  for(let i=0;i<qualShuffled.length;i+=2){
+    qualTies.push({
+      home:qualShuffled[i],away:qualShuffled[i+1],
+      played:false,homeGoals:0,awayGoals:0,homeScorers:[],awayScorers:[],winner:null,et:false,pens:false,
+      leg1HomeGoals:0,leg1AwayGoals:0,leg1Played:false,
+      leg2HomeGoals:0,leg2AwayGoals:0,leg2Played:false,
+    });
   }
   G.carabaoCup={
-    rounds:[{name:'Round of 16',week:4,ties,done:false}],
+    rounds:[{name:'Qualifying Round (1st Leg)',week:2,twoLegs:true,leg:1,ties:qualTies,done:false}],
     currentRound:0,eliminated:false,winner:null,myRoundResults:[],
+    _qualByeTeams:byeTeams,
   };
 }
 
@@ -8695,9 +8756,103 @@ function getCarabaoMyTie(){
   return round.ties.find(t=>t.home===G.myClub||t.away===G.myClub)||null;
 }
 
+function _carabaoSimQualLeg(tie, isLeg1){
+  const hStr=(CLUBS[tie.home]||{str:70}).str;
+  const aStr=(CLUBS[tie.away]||{str:70}).str;
+  const hG=poisson((hStr/aStr)*1.15+0.25);
+  const aG=poisson((aStr/hStr)*1.05+0.1);
+  if(isLeg1){ tie.leg1HomeGoals=hG; tie.leg1AwayGoals=aG; tie.leg1Played=true; }
+  else { tie.leg2HomeGoals=hG; tie.leg2AwayGoals=aG; tie.leg2Played=true; }
+}
+
+function _carabaoQualTieWinner(tie){
+  const origHome=tie._origHome||tie.home;
+  const origAway=tie._origAway||tie.away;
+  const origHomeAgg=tie.leg1HomeGoals+tie.leg2AwayGoals;
+  const origAwayAgg=tie.leg1AwayGoals+tie.leg2HomeGoals;
+  if(origHomeAgg>origAwayAgg) return origHome;
+  if(origAwayAgg>origHomeAgg) return origAway;
+  const origHomeAwayGoals=tie.leg2AwayGoals;
+  const origAwayAwayGoals=tie.leg1AwayGoals;
+  if(origAwayAwayGoals>origHomeAwayGoals) return origAway;
+  if(origHomeAwayGoals>origAwayAwayGoals) return origHome;
+  tie.pens=true;
+  const hStr=(CLUBS[origHome]||{str:70}).str;
+  const aStr=(CLUBS[origAway]||{str:70}).str;
+  return Math.random()<(hStr/(hStr+aStr))?origHome:origAway;
+}
+
 function simulateCarabaoRound(roundIdx){
   const round=G.carabaoCup.rounds[roundIdx];
   if(!round||round.done)return;
+
+  // ── Two-legged qualifying ──
+  if(round.twoLegs){
+    const isLeg1=round.leg===1;
+    const winners=[];
+    round.ties.forEach(tie=>{
+      if(tie.home===G.myClub||tie.away===G.myClub) return; // player plays manually
+      if(isLeg1){
+        if(!tie.leg1Played) _carabaoSimQualLeg(tie,true);
+      } else {
+        if(!tie.leg2Played) _carabaoSimQualLeg(tie,false);
+        if(tie.leg1Played&&tie.leg2Played){
+          tie.winner=_carabaoQualTieWinner(tie);
+          tie.played=true;
+          winners.push(tie.winner);
+        }
+      }
+    });
+
+    const myTie=round.ties.find(t=>t.home===G.myClub||t.away===G.myClub);
+
+    if(isLeg1){
+      const myTiePlayed=!myTie||myTie.leg1Played;
+      if(!myTiePlayed) return;
+      round.done=true;
+      // Build leg 2 — swap home/away
+      const leg2Ties=round.ties.map(t=>({
+        home:t.away, away:t.home, // reversed
+        played:false,homeGoals:0,awayGoals:0,homeScorers:[],awayScorers:[],winner:null,et:false,pens:false,
+        leg1HomeGoals:t.leg1HomeGoals,leg1AwayGoals:t.leg1AwayGoals,leg1Played:true,
+        leg2HomeGoals:0,leg2AwayGoals:0,leg2Played:false,
+        _origHome:t.home,_origAway:t.away,
+      }));
+      G.carabaoCup.rounds.push({name:'Qualifying Round (2nd Leg)',week:4,twoLegs:true,leg:2,ties:leg2Ties,done:false});
+      G.carabaoCup.currentRound=roundIdx+1;
+      notify('🥤 Carabao Cup Qualifying 2nd Leg draw made!','var(--gr)');
+      return;
+    }
+
+    // Leg 2 — resolve ties
+    const myTiePlayed=!myTie||myTie.played;
+    if(!myTiePlayed) return;
+    if(myTie&&myTie.played&&!myTie.winner){
+      myTie.winner=_carabaoQualTieWinner(myTie);
+    }
+    round.done=true;
+
+    if(myTie&&myTie.winner!==G.myClub){
+      G.carabaoCup.eliminated=true;
+      notify(`💔 ${G.myClub} eliminated in Carabao Cup Qualifying!`,'var(--rd)');
+      return;
+    }
+
+    // Collect winners + bye teams for Round of 16
+    const qualWinners=round.ties.map(t=>t.winner).filter(Boolean);
+    const byeTeams=G.carabaoCup._qualByeTeams||[];
+    const roundOf16Teams=[...byeTeams,...qualWinners].sort(()=>Math.random()-.5);
+    const newTies=[];
+    for(let i=0;i<roundOf16Teams.length;i+=2){
+      newTies.push({home:roundOf16Teams[i],away:roundOf16Teams[i+1],played:false,homeGoals:0,awayGoals:0,homeScorers:[],awayScorers:[],winner:null,et:false,pens:false});
+    }
+    G.carabaoCup.rounds.push({name:'Round of 16',week:7,ties:newTies,done:false});
+    G.carabaoCup.currentRound=roundIdx+1;
+    notify('🥤 Carabao Cup Round of 16 draw made — 8 teams!','var(--gr)');
+    return;
+  }
+
+  // ── Standard single-leg rounds ──
   const winners=[];
   round.ties.forEach(tie=>{
     if(tie.home==='Bye'){winners.push(tie.away);tie.winner=tie.away;tie.played=true;return;}
@@ -8730,7 +8885,7 @@ function simulateCarabaoRound(roundIdx){
     return;
   }
   const shuffled=[...winners].sort(()=>Math.random()-.5);
-  // Ensure even bracket — drop weakest team if odd (shouldn't happen but safety net)
+  // Ensure even bracket
   if(shuffled.length%2!==0){
     const dropIdx=shuffled.map((c,i)=>({c,i,str:(CLUBS[c]||{str:70}).str})).filter(x=>x.c!==G.myClub).sort((a,b)=>a.str-b.str)[0]?.i;
     if(dropIdx!==undefined)shuffled.splice(dropIdx,1);
@@ -8781,7 +8936,7 @@ function renderCarabaoCup(){
             <div style="display:flex;align-items:center;gap:12px;justify-content:center">
               ${logoImg(G.myClub,40)}<div class="bebas" style="font-size:36px;color:${won?'var(--gr)':'var(--rd)'}">${mg}–${og}</div>${logoImg(opp,40)}
             </div>
-            <div style="text-align:center;margin-top:6px;font-size:12px;color:${won?'var(--gr)':'var(--rd)'}font-weight:700">${won?'✅ Through to next round!':'❌ Eliminated'}</div>
+            <div style="text-align:center;margin-top:6px;font-size:12px;color:${won?'var(--gr)':'var(--rd)'};font-weight:700">${won?'✅ Through to next round!':'❌ Eliminated'}</div>
           </div>`;
       } else if(G.week>=round.week){
         document.getElementById('carabao-my-fixture').innerHTML=`
@@ -8847,28 +9002,33 @@ function kickOffCarabaoMatch(){
 function quickSimCarabaoMatch(){
   const myTie=getCarabaoMyTie();
   if(!myTie){notify('No cup tie to simulate!','var(--rd)');return;}
+  const round=G.carabaoCup.rounds[G.carabaoCup.currentRound];
+  const isQualLeg=round&&round.twoLegs;
   const isH=myTie.home===G.myClub;
   const opp=isH?myTie.away:myTie.home;
   const oc=CLUBS[opp]||{str:70};
   const effStr=getEffectiveStr();
   const myG=poisson(Math.max(0.1,(effStr/oc.str)*1.15+0.2));
   const opG=poisson(Math.max(0.1,(oc.str/effStr)*1.1));
-  let finalMyG=myG,finalOpG=opG,et=false,pens=false;
-  if(myG===opG){et=true;const etMyG=poisson(0.4),etOpG=poisson(0.35);finalMyG+=etMyG;finalOpG+=etOpG;if(finalMyG===finalOpG){pens=true;finalMyG+=Math.random()<(effStr/(effStr+oc.str))?1:0;}}
-  const won=finalMyG>finalOpG;
-  // Pick scorers from actual starting XI
   const startXI=(G.confirmedLineup||G.lineup).slice(0,11).map(i=>G.squad[i]).filter(p=>p&&!p.injury);
   function pickWS(players){const pool=players.filter(p=>p.pos!=='GK');if(!pool.length)return null;const w=pool.map(p=>(posGroup(p.pos)==='FWD'?8:posGroup(p.pos)==='MID'?3:1)*Math.max(1,(p.rating-55)/8));const t=w.reduce((a,b)=>a+b,0);let r=Math.random()*t;for(let i=0;i<pool.length;i++){r-=w[i];if(r<=0)return pool[i];}return pool[pool.length-1];}
-  const myScorers=[];for(let i=0;i<finalMyG;i++){const sc=pickWS(startXI);if(sc){sc.carabaoGoals=(sc.carabaoGoals||0)+1;myScorers.push({name:sc.name,min:rnd(1,90)});}}
+  const myScorers=[];for(let i=0;i<myG;i++){const sc=pickWS(startXI);if(sc){sc.carabaoGoals=(sc.carabaoGoals||0)+1;myScorers.push({name:sc.name,min:rnd(1,90)});const ap=startXI.filter(p=>p!==sc&&(posGroup(p.pos)==='MID'||posGroup(p.pos)==='FWD'));if(ap.length&&Math.random()<.75){const asr=ap[rnd(0,ap.length-1)];asr.carabaoAssists=(asr.carabaoAssists||0)+1;myScorers[myScorers.length-1].assist=asr.name;}}}
   const oppSquad=allPlayersByClub[opp]||[{name:'Unknown',pos:'FWD'}];
-  const oppScorers=[];for(let i=0;i<finalOpG;i++){const fwds=oppSquad.filter(p=>posGroup(p.pos)==='FWD'||posGroup(p.pos)==='MID');const sc=fwds[rnd(0,fwds.length-1)]||oppSquad[0];oppScorers.push({name:sc.name,min:rnd(1,90)});}
-  myTie.homeGoals=isH?finalMyG:finalOpG;myTie.awayGoals=isH?finalOpG:finalMyG;
-  myTie.homeScorers=isH?myScorers:oppScorers;myTie.awayScorers=isH?oppScorers:myScorers;
-  myTie.played=true;myTie.et=et;myTie.pens=pens;myTie.winner=won?G.myClub:opp;
-  G.carabaoCup.myRoundResults.push({round:CARABAO_ROUNDS[G.carabaoCup.currentRound]?.name,opponent:opp,myG:finalMyG,opG:finalOpG,won,et,pens});
-  G.results.push({home:isH?G.myClub:opp,away:isH?opp:G.myClub,homeGoals:isH?finalMyG:finalOpG,awayGoals:isH?finalOpG:finalMyG,homeScorers:isH?myScorers:oppScorers,awayScorers:isH?oppScorers:myScorers,week:G.week,comp:'carabao',isCup:true,pens,et});
-  if(won){notify(`✅ Carabao Cup: ${G.myClub} ${finalMyG}–${finalOpG} ${opp}${pens?' (Pens)':et?' (AET)':''} — Through!`,'var(--gr)');simulateCarabaoRound(G.carabaoCup.currentRound);}
-  else{G.carabaoCup.eliminated=true;notify(`💔 Carabao Cup exit: ${G.myClub} ${finalMyG}–${finalOpG} ${opp}${pens?' (Pens)':et?' (AET)':''}. Eliminated.`,'var(--rd)');}
+  const oppScorers=[];for(let i=0;i<opG;i++){const fwds=oppSquad.filter(p=>posGroup(p.pos)==='FWD'||posGroup(p.pos)==='MID');const sc=fwds[rnd(0,fwds.length-1)]||oppSquad[0];oppScorers.push({name:sc.name,min:rnd(1,90)});}
+  G.results.push({home:isH?G.myClub:opp,away:isH?opp:G.myClub,homeGoals:isH?myG:opG,awayGoals:isH?opG:myG,homeScorers:isH?myScorers:oppScorers,awayScorers:isH?oppScorers:myScorers,week:G.week,comp:'carabao',isCup:true});
+  if(isQualLeg){
+    _finaliseQualLeg(myTie,myG,opG,isH,'carabao');
+  } else {
+    let finalMyG=myG,finalOpG=opG,et=false,pens=false;
+    if(myG===opG){et=true;const etMyG=poisson(0.4),etOpG=poisson(0.35);finalMyG+=etMyG;finalOpG+=etOpG;if(finalMyG===finalOpG){pens=true;finalMyG+=Math.random()<(effStr/(effStr+oc.str))?1:0;}}
+    const won=finalMyG>finalOpG;
+    myTie.homeGoals=isH?finalMyG:finalOpG;myTie.awayGoals=isH?finalOpG:finalMyG;
+    myTie.homeScorers=isH?myScorers:oppScorers;myTie.awayScorers=isH?oppScorers:myScorers;
+    myTie.played=true;myTie.et=et;myTie.pens=pens;myTie.winner=won?G.myClub:opp;
+    G.carabaoCup.myRoundResults.push({round:round?.name,opponent:opp,myG:finalMyG,opG:finalOpG,won,et,pens});
+    if(won){notify(`✅ Carabao Cup: Through!${pens?' (Pens)':et?' (AET)':''}`, 'var(--gr)');simulateCarabaoRound(G.carabaoCup.currentRound);}
+    else{G.carabaoCup.eliminated=true;notify(`💔 Carabao Cup exit: ${finalMyG}–${finalOpG}. Eliminated.`,'var(--rd)');}
+  }
   renderCarabaoCup();
 }
 
@@ -9018,7 +9178,7 @@ function quickSimFACupMatch(){
   const opG=poisson(Math.max(0.1,(oc.str/effStr)*1.05+0.1));
   const startXI=(G.confirmedLineup||G.lineup).slice(0,11).map(i=>G.squad[i]).filter(p=>p&&!p.injury);
   function pickWS(players){const pool=players.filter(p=>p.pos!=='GK');if(!pool.length)return null;const w=pool.map(p=>(posGroup(p.pos)==='FWD'?8:posGroup(p.pos)==='MID'?3:1)*Math.max(1,(p.rating-55)/8));const t=w.reduce((a,b)=>a+b,0);let r=Math.random()*t;for(let i=0;i<pool.length;i++){r-=w[i];if(r<=0)return pool[i];}return pool[pool.length-1];}
-  const myScorers=[];for(let i=0;i<myG;i++){const sc=pickWS(startXI);if(sc){sc.facupGoals=(sc.facupGoals||0)+1;myScorers.push({name:sc.name,min:rnd(1,90)});}}
+  const myScorers=[];for(let i=0;i<myG;i++){const sc=pickWS(startXI);if(sc){sc.facupGoals=(sc.facupGoals||0)+1;myScorers.push({name:sc.name,min:rnd(1,90)});const ap=startXI.filter(p=>p!==sc&&(posGroup(p.pos)==='MID'||posGroup(p.pos)==='FWD'));if(ap.length&&Math.random()<.75){const asr=ap[rnd(0,ap.length-1)];asr.facupAssists=(asr.facupAssists||0)+1;myScorers[myScorers.length-1].assist=asr.name;}}}
   const oppSquad=allPlayersByClub[opp]||[{name:'Unknown',pos:'FWD'}];
   const oppScorers=[];for(let i=0;i<opG;i++){const fwds=oppSquad.filter(p=>posGroup(p.pos)==='FWD'||posGroup(p.pos)==='MID');const sc=fwds[rnd(0,fwds.length-1)]||oppSquad[0];oppScorers.push({name:sc.name,min:rnd(1,90)});}
   G.results.push({home:amHome?G.myClub:opp,away:amHome?opp:G.myClub,homeGoals:amHome?myG:opG,awayGoals:amHome?opG:myG,homeScorers:amHome?myScorers:oppScorers,awayScorers:amHome?oppScorers:myScorers,week:G.week,comp:'facup',isCup:true});
@@ -9040,33 +9200,49 @@ function quickSimFACupMatch(){
 
 // Shared helper for finalising a two-legged qualifying tie (either leg)
 function _finaliseQualLeg(tie,myG,opG,amHome,cupType){
-  const round=cupType==='facup'?G.faCup.rounds[G.faCup.currentRound]:null;
+  const round=cupType==='facup'?G.faCup.rounds[G.faCup.currentRound]:cupType==='carabao'?G.carabaoCup.rounds[G.carabaoCup.currentRound]:null;
   const isLeg1=round&&round.leg===1;
   const isLeg2=round&&round.leg===2;
+  const cup=cupType==='facup'?G.faCup:cupType==='carabao'?G.carabaoCup:null;
+  const cupName=cupType==='facup'?'FA Cup':'Carabao Cup';
+  const cupColor=cupType==='facup'?'#5588ff':'var(--gr)';
+  
   if(isLeg1){
     tie.leg1HomeGoals=amHome?myG:opG;
     tie.leg1AwayGoals=amHome?opG:myG;
     tie.leg1Played=true;
-    tie.played=true; // mark leg as "played" so simulateFACupRound progresses
-    notify('✅ FA Cup Qualifying 1st Leg done — 2nd Leg coming GW4!','#5588ff');
-    simulateFACupRound(G.faCup.currentRound);
+    tie.homeGoals=amHome?myG:opG;
+    tie.awayGoals=amHome?opG:myG;
+    tie.played=true;
+    notify(`✅ ${cupName} Qualifying 1st Leg done — 2nd Leg coming GW4!`,cupColor);
+    if(cupType==='facup') simulateFACupRound(cup.currentRound);
+    else if(cupType==='carabao') simulateCarabaoRound(cup.currentRound);
   } else if(isLeg2){
     tie.leg2HomeGoals=amHome?myG:opG;
     tie.leg2AwayGoals=amHome?opG:myG;
     tie.leg2Played=true;
+    tie.homeGoals=amHome?myG:opG;
+    tie.awayGoals=amHome?opG:myG;
     // Determine aggregate winner
-    const winner=_faQualTieWinner(tie);
+    const winnerFunc=cupType==='facup'?_faQualTieWinner:_carabaoQualTieWinner;
+    const winner=winnerFunc(tie);
     tie.winner=winner;
     tie.played=true;
     const won=winner===G.myClub;
-    const opp=amHome?(tie.away):(tie.home);
+    const opp=amHome?(tie._origAway||tie.away):(tie._origHome||tie.home);
     const myLeg1G=tie._origHome===G.myClub?tie.leg1HomeGoals:tie.leg1AwayGoals;
     const oppLeg1G=tie._origHome===G.myClub?tie.leg1AwayGoals:tie.leg1HomeGoals;
     const myAgg=myLeg1G+myG;
     const oppAgg=oppLeg1G+opG;
-    G.faCup.myRoundResults.push({round:'Qualifying',opponent:opp,myG:myAgg,opG:oppAgg,won,pens:tie.pens});
-    if(won){notify(`✅ FA Cup Qualifying: Through on aggregate (${myAgg}–${oppAgg})!`,'#5588ff');simulateFACupRound(G.faCup.currentRound);}
-    else{G.faCup.eliminated=true;notify(`💔 FA Cup Qualifying exit: ${myAgg}–${oppAgg} on aggregate.`,'var(--rd)');}
+    cup.myRoundResults.push({round:'Qualifying',opponent:opp,myG:myAgg,opG:oppAgg,won,pens:tie.pens});
+    if(won){
+      notify(`✅ ${cupName} Qualifying: Through on aggregate (${myAgg}–${oppAgg})!`,cupColor);
+      if(cupType==='facup') simulateFACupRound(cup.currentRound);
+      else if(cupType==='carabao') simulateCarabaoRound(cup.currentRound);
+    } else {
+      cup.eliminated=true;
+      notify(`💔 ${cupName} Qualifying exit: ${myAgg}–${oppAgg} on aggregate.`,'var(--rd)');
+    }
   }
 }
 
